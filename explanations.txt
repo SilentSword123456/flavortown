@@ -1,0 +1,652 @@
+FLAVORTOWN SYSTEM EXPLANATIONS
+===============================
+
+This document provides detailed explanations of how various processes work in the Flavortown application, a platform where Hack Club members can track their projects, earn currency (cookies 🍪), and redeem items from the shop.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. HOW ARE COOKIES (THE CURRENCY) GIVEN?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Cookies are the virtual currency in Flavortown that users can earn and spend in the shop. The system uses a "ledger" architecture where all cookie transactions are immutable and tracked in the ledger_entries table.
+
+HOW COOKIES ARE EARNED:
+
+A. Through Achievements (Primary Method):
+   Cookies are primarily awarded when users earn achievements. The system has a comprehensive achievement system defined in app/models/achievement.rb with various milestones:
+
+   • First Login ("Anyone Can Cook!") - 0 cookies (but unlocks the platform)
+   • Identity Verified ("Very Fried") - 5 cookies
+   • First Project ("Home Cookin'") - 3 cookies
+   • First Devlog ("Recipe Notes") - 2 cookies
+   • First Comment ("Yapper") - 0 cookies
+   • Flavortown Introduction ("Hello, Kitchen!") - 2 cookies
+   • Five Projects ("Line Cook") - 10 cookies
+   • First Ship ("Order Up!") - 3 cookies
+   • Ship Certified ("Michelin Star") - 3 cookies
+   • Ten Devlogs ("Cookbook Author") - 15 cookies (secret achievement)
+   • Cooking (Fire Project) - 5 cookies (secret achievement)
+
+   PROCESS:
+   - When a user performs an action (creates project, posts devlog, etc.), the system checks if they've earned new achievements
+   - If an achievement with a cookie_reward > 0 is earned, a ledger entry is automatically created
+   - This happens via the User::Achievement model's after_create :grant_cookie_reward callback
+   - The ledger entry has the amount set to the achievement's cookie_reward
+   - The reason field notes: "Achievement: [Achievement Name]"
+   - The created_by field is set to: "achievement:[achievement_slug]"
+
+B. Welcome Grant:
+   • When a user first accesses the shop to get free stickers, they receive 10 cookies
+   • This is granted via grant_free_stickers_welcome_cookies! in shop_controller.rb
+   • Reason: "Free Stickers Welcome Grant"
+   • Created by: "System"
+   • This grant only happens once per user
+
+C. Manual Admin Grants:
+   • Admins can manually grant cookies to users through the admin interface
+   • These appear as ledger entries with ledgerable_type: "User"
+   • Reason and created_by fields are customizable by the admin
+
+WHEN DO YOU RECEIVE COOKIES?
+
+Cookies are awarded immediately when the triggering event occurs:
+- Achievements are checked after various actions (creating projects, posting devlogs, etc.)
+- The cookie grant happens synchronously in the same database transaction
+- Users can see their updated balance instantly after earning an achievement
+- If slack_balance_notifications is enabled, users get a Slack DM notification
+
+HOW MUCH DO YOU RECEIVE?
+
+The amounts are fixed per achievement (see list above). The total ranges from:
+- Minimum: 0 cookies (some achievements have no monetary reward)
+- Maximum visible achievement: 15 cookies (Ten Devlogs)
+- Average per achievement: 2-5 cookies
+- Welcome grant: 10 cookies (one-time)
+
+TECHNICAL DETAILS:
+
+The cookie balance system works through:
+1. LedgerEntry model (app/models/ledger_entry.rb) - immutable transaction log
+2. User#balance method calculates: ledger_entries.sum(:amount)
+3. User#cached_balance uses Rails cache for performance
+4. Positive amounts = cookies earned
+5. Negative amounts = cookies spent (shop purchases)
+6. All entries are immutable - cannot be edited or deleted (blockchain-like)
+7. Paper trail auditing tracks all balance changes for user ledgerable_type entries
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+2. HOW DOES THE VOTING SYSTEM WORK?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The voting system allows verified users to review and rate shipped projects in three categories.
+
+WHO CAN VOTE?
+
+Requirements to vote (enforced in votes_controller.rb):
+1. Must be logged in
+2. Must have verification_status = "verified" OR be an admin
+3. Cannot vote on your own projects (validated in Vote model)
+4. Can only vote once per ship_event per category
+
+VOTING CATEGORIES:
+
+Each vote is submitted in one of three categories (defined in Vote::Category):
+
+1. Originality (id: 0)
+   - Description: "How distinct it is from common projects?"
+   - Measures uniqueness and creativity
+
+2. Technical (id: 1)
+   - Description: "How much effort did the baker put into the implementation?"
+   - Measures technical complexity and craftsmanship
+
+3. Usability (id: 2)
+   - Description: "Did you like using it? Could you use it at all?"
+   - Measures user experience and functionality
+
+VOTING PROCESS:
+
+1. User navigates to /votes/new
+2. System finds a random project from those "looking_for_votes":
+   - Must have an approved ship_event
+   - Must have less than 20 votes (VOTES_REQUIRED_FOR_PAYOUT constant)
+   - Must not have a payout yet
+   - Must belong to a verified user
+   - Voter cannot be a member of the project
+   - Voter hasn't already voted on the latest ship_event
+
+3. User rates the project on all 3 categories:
+   - Score range: 1-5 for each category
+   - Optional: Add text feedback/reason
+   - System tracks: time_taken_to_vote, repo_url_clicked, demo_url_clicked
+
+4. On submission:
+   - Three Vote records are created (one per category)
+   - Each vote links to: user_id, project_id, and ship_event_id
+   - votes_count is incremented on the ship_event (counter cache)
+   - Unique constraint prevents duplicate votes: (user_id, ship_event_id, category)
+
+5. Optional Slack sharing:
+   - If user has send_votes_to_slack enabled
+   - Votes are shared to #flavortown-votes channel (C0A2DTFSYSD)
+
+WHAT HAPPENS WITH THE VOTES?
+
+- Votes are stored permanently and cannot be deleted
+- votes_count on Post::ShipEvent tracks total votes received
+- Projects "looking for votes" are prioritized in the voting queue (ordered by votes_count ASC)
+- The constant VOTES_REQUIRED_FOR_PAYOUT = 20 indicates a threshold
+- When a ship_event reaches 20 votes and is approved, it's eligible for payout
+- However, based on code analysis, the payout mechanism appears to be handled externally 
+  (payout field exists on post_ship_events table but the calculation logic is not in the main app)
+
+VOTING HISTORY:
+
+- Users can view their voting history at /votes
+- Shows all projects they've voted on, grouped by project
+- Displays most recent votes first
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+3. WHAT DOES A PROJECT WHICH IS SHIPPED DO?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Shipping a project is the process of submitting it for review and certification. Here's the complete workflow:
+
+SHIPPING REQUIREMENTS (must all be met):
+
+1. demo_url must be present - experienceable link where anyone can try the project
+2. repo_url must be present - public GitHub URL with source code
+3. readme_url must be present - README documentation
+4. description must be present - project description
+5. banner must be attached - screenshot/image of the project
+6. At least one devlog must exist
+7. User must be eligible_for_shop (verified + ysws_eligible)
+8. If not first ship: must have a devlog since last ship
+
+SHIP PROCESS STEPS:
+
+Step 1: Prepare Project
+- User navigates to /projects/:id/ship
+- Goes through 4-step wizard to add/verify:
+  - Links (demo, repo, readme)
+  - Description and banner
+  - Project categories
+  - Ship update message
+
+Step 2: Submit for Review (submit_ship action)
+- User writes a ship update message (required, non-empty)
+- System validates all shipping requirements
+- Project state changes to "submitted" via AASM state machine
+- shipped_at timestamp is set to current time
+- A Post::ShipEvent is created with the user's update message
+- certification_status defaults to "pending"
+
+Step 3: External Certification
+- ShipCertService.ship_to_dash sends project data to external dashboard
+- Data sent includes:
+  - Project ID, title, type, description
+  - Submitter info (Slack ID, username)
+  - Links (demo, repo, readme)
+  - Metadata (dev time tracked)
+- Webhook URL: ENV["SW_DASHBOARD_WEBHOOK_URL"]
+- API Key: ENV["SW_DASHBOARD_API_KEY"]
+
+Step 4: Review Process
+- External reviewers examine the project
+- They send back status via webhook (Webhooks::ShipCertController)
+- Possible statuses:
+  - "pending" - waiting for review
+  - "approved" - project meets standards
+  - "rejected" - project needs improvement
+- Reviewers can provide:
+  - video_url - feedback video
+  - reason - text explanation
+  - project_type - categorization
+
+Step 5: Notification
+- User receives Slack DM with result
+- If approved: "🎉 Your ship has been approved!"
+- If rejected: "❌ Your ship needs more work" + feedback
+- Project owner gets notification via SendSlackDmJob
+
+WHAT CHANGES AFTER SHIPPING:
+
+1. Project visibility:
+   - Approved ships appear in explore/public listings
+   - ShipEvent posts only show on project page if certification_status = "approved"
+   - Project shows on voting queue if approved and needs votes
+
+2. Project state:
+   - ship_status changes: draft → submitted → approved/rejected
+   - shipped_at timestamp records when shipped
+   - Can ship again only if has_devlog_since_last_ship? returns true
+
+3. Achievements triggered:
+   - First ship: "Order Up!" achievement (3 cookies)
+   - First approved ship: "Michelin Star" achievement (3 cookies)
+
+4. Voting eligibility:
+   - Approved projects enter the voting queue
+   - Need to accumulate 20 votes for payout eligibility
+   - Other verified users can discover and vote on the project
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+4. CAN YOU STILL EDIT AND ADD DEVLOGS AND STUFF ON A SHIPPED PROJECT?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+YES! Shipping a project does NOT lock it down. Here's what you can still do:
+
+EDITABLE AFTER SHIPPING:
+
+1. Project Metadata:
+   - Title (project.title)
+   - Description (project.description)
+   - Demo URL (project.demo_url)
+   - Repo URL (project.repo_url)
+   - README URL (project.readme_url)
+   - Banner image (project.banner)
+   - Project categories (project.project_categories)
+   - All editable via /projects/:id/edit
+
+2. Add New Devlogs:
+   - Devlogs can be added anytime via /projects/:id/devlogs/new
+   - No restrictions based on ship status
+   - In fact, NEW DEVLOGS ARE REQUIRED to ship again
+   - The system enforces: can_ship_again? requires has_devlog_since_last_ship?
+   - This encourages continuous development
+
+3. Add More Ships:
+   - Projects can be shipped multiple times
+   - Each ship creates a new Post::ShipEvent
+   - Requirement: must have at least one devlog since last ship
+   - AASM allows transitions: submitted → submitted (re-shipping)
+   - This enables iterative improvement and showing progress
+
+4. Project Membership:
+   - Can add/remove project members
+   - Change roles (owner, member)
+
+NOT EDITABLE:
+
+1. Past Ship Events:
+   - Once a ShipEvent is created, its body cannot be edited
+   - certification_status is set by reviewers (via webhook)
+   - This preserves history and integrity of reviews
+
+2. Past Devlogs:
+   - Devlogs are immutable once created
+   - This maintains an accurate development history
+
+3. Votes Received:
+   - Cannot delete or modify votes
+   - Ensures voting integrity
+
+SHIP STATUS STATE MACHINE:
+
+States: draft → submitted → under_review → approved/rejected
+
+Transitions:
+- draft → submitted: First ship or re-ship (if has devlog since last ship)
+- submitted → under_review: Review starts
+- under_review → approved: Passes certification
+- under_review → rejected: Needs improvement
+- rejected → submitted: Can re-ship after improvements + new devlog
+- approved → submitted: Can ship updates with new devlogs
+
+Key insight: The "submitted" state is reusable - you can transition from any state back to submitted (if you have new devlogs), allowing continuous improvement and multiple certifications.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+5. WHAT HAPPENS WITH THE VOTES ON A PROJECT?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Votes are permanently stored and serve multiple purposes:
+
+VOTE TRACKING:
+
+1. Database Storage:
+   - Each vote is stored in the votes table
+   - Fields tracked per vote:
+     - user_id (who voted)
+     - project_id (which project)
+     - ship_event_id (which specific ship)
+     - category (originality/technical/usability)
+     - score (1-5 rating)
+     - reason (optional text feedback)
+     - time_taken_to_vote (metrics)
+     - repo_url_clicked, demo_url_clicked (engagement metrics)
+
+2. Aggregation:
+   - votes_count on post_ship_events is a counter cache
+   - Automatically increments when votes are created
+   - Used to track progress toward payout threshold (20 votes)
+   - Used to determine voting queue priority
+
+VOTE LIFECYCLE PER SHIP EVENT:
+
+1. New Ship (0 votes):
+   - certification_status = "pending"
+   - Not eligible for voting queue yet
+
+2. Approved Ship (certification_status = "approved"):
+   - Enters voting queue if votes_count < 20
+   - Project appears in /votes/new for verified users
+   - Prioritized by votes_count ASC (fewer votes = higher priority)
+
+3. Accumulating Votes (1-19 votes):
+   - Continues appearing in voting queue
+   - Each vote increments votes_count
+   - Users can vote once per category per ship_event (3 total votes per voter)
+   - Unique constraint: (user_id, ship_event_id, category)
+
+4. Threshold Reached (20 votes):
+   - Project exits voting queue
+   - payout field on post_ship_events remains NULL until processed
+   - Eligible for payout (exact mechanism handled externally)
+
+5. After Payout:
+   - payout field is populated with amount
+   - Project no longer appears in voting queue
+   - Votes remain permanently in database
+
+VOTES ACROSS MULTIPLE SHIPS:
+
+Important: Votes are tied to a specific ship_event_id, NOT just the project!
+
+- If you ship version 1: gets its own set of votes
+- If you ship version 2 (after adding devlogs): gets NEW set of votes
+- Each ship_event maintains its own votes_count
+- Previous ships' votes don't transfer to new ships
+- This allows projects to be re-reviewed after improvements
+
+VOTE VISIBILITY:
+
+- Votes are visible to:
+  - The voter (in their /votes history)
+  - Potentially project owners (though UI for this isn't explicitly shown)
+  - Admins (through admin interfaces)
+  - Vote reasons are stored but not publicly displayed on project pages
+
+VOTE INTEGRITY:
+
+Protections in place:
+1. Cannot vote on own projects (validated in Vote model)
+2. Cannot vote twice on same ship_event + category (unique constraint)
+3. Must be verified user to vote
+4. Votes are immutable - no editing or deletion
+5. Counter cache automatically maintained
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+6. WHO CAN VOTE ON YOUR PROJECT?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ELIGIBILITY REQUIREMENTS FOR VOTERS:
+
+1. Account Status:
+   - Must be logged in (have a user account)
+   - Must have verification_status = "verified"
+   - Exception: Admins can vote regardless of verification status
+
+2. Verification Process:
+   - Users must link their identity (hack_club identity)
+   - Must pass identity verification (verification_status: "verified")
+   - Enforced in ensure_user_can_vote before_action in votes_controller.rb
+   - If not verified: redirected with message "voting unlocks after your account is verified!"
+
+3. Relationship to Project:
+   - Cannot be a member of the project being voted on
+   - Checked via: project.users.exists?(user_id)
+   - Validation error: "cannot vote on own projects"
+   - This prevents self-voting and team member voting
+
+4. Previous Voting History:
+   - Cannot have already voted on the current ship_event
+   - Unique constraint: (user_id, ship_event_id, category)
+   - Must vote on all three categories in one session
+   - After voting on a ship, cannot vote on that same ship again
+
+PROJECT ELIGIBILITY FOR RECEIVING VOTES:
+
+Your project can receive votes when:
+
+1. Ship Status:
+   - certification_status must be "approved"
+   - Projects with "pending" or "rejected" status don't appear in voting queue
+   - Must be a submitted/approved ship (not draft)
+
+2. Vote Count:
+   - votes_count must be less than 20
+   - Once 20 votes reached, exits voting queue
+   - payout must be NULL (not already paid out)
+
+3. Project Owner Status:
+   - At least one project member must have verification_status = "verified"
+   - Checked via EXISTS query on project_memberships + users
+   - This ensures only verified users' projects receive votes
+
+4. Active Status:
+   - Project must not be soft-deleted (deleted_at IS NULL)
+   - Project must be "kept" (in default scope)
+
+VOTING QUEUE MECHANICS:
+
+The looking_for_votes scope (in Project model) implements complex SQL:
+
+1. Joins latest ship_event for each project
+2. Filters for:
+   - certification_status = "approved"
+   - votes_count < 20
+   - payout IS NULL
+   - Has verified user as member
+3. Orders by votes_count ASC (projects with fewer votes prioritized)
+4. Used by votable_by(user) to exclude:
+   - User's own projects
+   - Projects user already voted on
+
+RANDOM SELECTION:
+
+When user visits /votes/new:
+- System gets up to 10 eligible projects
+- Randomly selects one using .sample
+- Shows voter the last 5 devlogs for context
+- Ensures diverse distribution of votes across projects
+
+WHO TYPICALLY VOTES:
+
+Based on the system design:
+- Other Hack Club members building projects
+- Community members who have verified their identity
+- Users who want to engage with the community
+- Anyone in the Flavortown ecosystem except:
+  - Unverified users
+  - Project team members
+  - Users who already voted on that ship
+
+VOTING CULTURE:
+
+The system encourages:
+- Thoughtful review (tracks time spent)
+- Engagement with projects (tracks URL clicks)
+- Optional constructive feedback (reason field)
+- Community participation (optional Slack sharing)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+7. HOW DOES STAFF VERIFY YOUR PROJECT?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The verification process uses an EXTERNAL DASHBOARD system, not direct code inspection in Flavortown.
+
+VERIFICATION ARCHITECTURE:
+
+1. Submission Phase (in Flavortown):
+   - User clicks "Ship" after completing 4-step wizard
+   - Flavortown validates shipping requirements locally
+   - Creates Post::ShipEvent with user's update message
+   - Calls ShipCertService.ship_to_dash(@project)
+
+2. Data Sent to Dashboard:
+   ShipCertService sends JSON payload via webhook:
+   
+   {
+     event: "ship.submitted",
+     data: {
+       id: project.id,
+       projectName: project.title,
+       submittedBy: {
+         slackId: owner.slack_id,
+         username: owner.display_name
+       },
+       projectType: project.project_type,
+       description: project.description,
+       links: {
+         demo: project.demo_url,
+         repo: project.repo_url,
+         readme: project.readme_url
+       },
+       metadata: {
+         devTime: "Xh Ym" (formatted time tracked)
+       }
+     }
+   }
+
+   - Sent to: ENV["SW_DASHBOARD_WEBHOOK_URL"]
+   - Authenticated with: ENV["SW_DASHBOARD_API_KEY"]
+   - User-Agent: "Flavortown/1.0 (ShipCertService)"
+
+3. External Review Process:
+   - Dashboard receives submission
+   - Staff/reviewers examine the project OUTSIDE Flavortown
+   - They have access to:
+     - demo_url - to test the live project
+     - repo_url - to view source code
+     - readme_url - to read documentation
+     - description - to understand intent
+     - devTime - to gauge effort invested
+   
+   The code does NOT specify exact review criteria, but reviewers likely check:
+   - Does the project work? (via demo_url)
+   - Is source code present? (via repo_url)
+   - Is it documented? (via readme_url)
+   - Is it a real project, not spam?
+   - Does it meet community standards?
+
+4. Review Decision:
+   - Reviewers make decision: approve or reject
+   - Can provide:
+     - status: "approved" or "rejected"
+     - video_url: optional feedback video
+     - reason: text explanation
+     - project_type: categorization/tag
+
+5. Callback to Flavortown:
+   - Dashboard sends webhook to: /webhooks/ship_cert/update_status
+   - Authenticated via x-api-key header
+   - Updates ship_event with:
+     - certification_status (approved/rejected)
+     - feedback_video_url
+     - feedback_reason
+   - Optionally updates project.project_categories
+
+6. Notification:
+   - Flavortown sends Slack DM to project owner
+   - Template: notifications/ship_cert/approved or rejected
+   - Includes feedback video and reason if provided
+
+WHAT STAFF REVIEWS:
+
+Based on the data sent and typical certification processes:
+
+DO Review:
+- ✓ Demo functionality (can they experience it?)
+- ✓ Code availability (is repo accessible?)
+- ✓ README quality (is project documented?)
+- ✓ Project legitimacy (real work vs spam)
+- ✓ Community standards compliance
+
+DO NOT Review (not sent to dashboard):
+- ✗ Individual devlog contents (not included in webhook)
+- ✗ Line-by-line code analysis (not practical at scale)
+- ✗ Hackatime data details (only total time sent)
+- ✗ Vote scores (votes come AFTER approval)
+- ✗ User's achievement history
+
+REVIEW DEPTH:
+
+The system appears designed for HIGH-LEVEL review:
+- Quick assessment via demo link
+- Repository check for presence of code
+- README scan for documentation
+- NOT deep code audits or security reviews
+
+This makes sense because:
+1. Scale: Many projects to review
+2. Educational context: Learning environment
+3. Focus: Encouraging building, not perfection
+4. Trust: Community-based system
+
+TRANSPARENCY:
+
+The system provides transparency through:
+- Feedback video (optional but encouraged)
+- Text reason explaining decision
+- Ability to re-ship after improvements
+- Clear requirements shown upfront
+
+APPROVAL BENEFITS:
+
+Once approved:
+1. Project appears in public explore pages
+2. Enters voting queue
+3. Ship event becomes visible on project page
+4. User earns "Michelin Star" achievement (3 cookies)
+5. Eligible for community votes and eventual payout
+
+REJECTION HANDLING:
+
+If rejected:
+1. User notified with feedback
+2. Can improve project based on feedback
+3. Must add new devlog showing work
+4. Can re-ship for another review
+5. Previous rejection doesn't permanently block project
+
+KEY INSIGHT:
+
+Staff verification is a LIGHTWEIGHT GATEKEEPING MECHANISM, not an in-depth code review. It ensures projects are legitimate, functional, and meet basic standards before entering the community voting phase. The focus is on accessibility, encouragement, and iterative improvement rather than perfection or comprehensive security audits.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ADDITIONAL SYSTEM NOTES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+HACKATIME INTEGRATION:
+- Users link their Hackatime account to track coding time
+- Time is pulled from Hackatime API when calculating devlog durations
+- Devlogs require minimum 15 minutes (900 seconds) of tracked time
+- Projects show total time invested from linked Hackatime projects
+
+SHOP SYSTEM:
+- Cookies are spent by purchasing items from the shop
+- Purchases create negative ledger entries
+- Shop orders go through states: pending → awaiting_verification → fulfilled
+- Users must be verified and ysws_eligible to purchase
+- Different fulfillment types: digital, physical, HCB grants, etc.
+
+PAPER TRAIL AUDITING:
+- All significant actions are audited via paper_trail gem
+- Balance adjustments are logged
+- Admin actions (mark_fire, role grants) are tracked
+- Provides accountability and history
+
+SLACK INTEGRATION:
+- Users authenticate via Slack
+- Notifications sent via Slack DMs
+- Project updates posted to channels
+- Optional vote sharing to community
+
+This document was generated through comprehensive code analysis of the Flavortown application as of the date of analysis. Specific implementation details may change over time.
