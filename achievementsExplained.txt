@@ -1,0 +1,158 @@
+FLAVORTOWN ACHIEVEMENTS GUIDE
+==============================
+
+This guide explains how to earn each achievement in Flavortown, including hidden and secret achievements.
+Achievements may award cookie rewards upon completion!
+
+================================================================================
+VISIBLE ACHIEVEMENTS
+================================================================================
+
+1. Anyone Can Cook! [first_login]
+   Icon: chepheus
+   Description: welcome to the kitchen, chef
+   How to Earn: Simply create an account and log in for the first time
+   Cookie Reward: 0 cookies
+
+2. Very Fried [identity_verified]
+   Icon: verified
+   Description: prove you belong in this kitchen!
+   How to Earn: Complete the identity verification process and get verified
+   Cookie Reward: 5 cookies
+
+3. Home Cookin' [first_project]
+   Icon: fork_spoon_fill
+   Description: fire up the stove and start your first dish
+   How to Earn: Create your first project in Flavortown
+   Cookie Reward: 3 cookies
+
+4. Recipe Notes [first_devlog]
+   Icon: edit
+   Description: jot down your cooking process
+   How to Earn: Create your first devlog post on any of your projects
+   Cookie Reward: 2 cookies
+
+5. Yapper [first_comment]
+   Icon: rac_yap
+   Description: awawawawawawawa
+   How to Earn: Post your first comment anywhere on the site
+   Cookie Reward: 0 cookies
+
+6. Off the Menu [first_order]
+   Icon: shopping_cart_1_fill
+   Description: treat yourself to something from the shop
+   How to Earn: Make your first shop purchase (excluding free stickers)
+   Cookie Reward: 0 cookies
+
+7. Regular Customer [five_orders]
+   Icon: shopping
+   Description: 5 orders in - the kitchen knows your name now
+   How to Earn: Complete 5 real shop orders
+   Progress Tracking: Shows X/5 orders completed
+   Cookie Reward: 0 cookies
+
+8. VIP Diner [ten_orders]
+   Icon: shopping_cart_1_fill
+   Description: 10 orders?! we're naming a dish after you
+   How to Earn: Complete 10 real shop orders
+   Progress Tracking: Shows X/10 orders completed
+   Cookie Reward: 0 cookies
+
+9. Line Cook [five_projects]
+   Icon: square_fill
+   Description: 5 dishes cooking at once? mise en place!
+   How to Earn: Create 5 projects
+   Progress Tracking: Shows X/5 projects created
+   Cookie Reward: 10 cookies
+
+10. Order Up! [first_ship]
+    Icon: ship
+    Description: ship your first project to the world
+    How to Earn: Submit your first project with ship_status set to "submitted"
+    Cookie Reward: 3 cookies
+
+11. Michelin Star [ship_certified]
+    Icon: trophy
+    Description: your dish has been certified by the critics
+    How to Earn: Have one of your ship events get approved (certification_status = "approved")
+    Cookie Reward: 3 cookies
+
+================================================================================
+SECRET ACHIEVEMENTS (Hidden Until Earned)
+================================================================================
+
+These achievements have their names and descriptions hidden until you earn them!
+They show as "???" with mysterious hints until unlocked.
+
+12. Cookbook Author [ten_devlogs]
+    Icon: fire
+    Description: 10 recipes documented - publish that cookbook!
+    How to Earn: Create 10 or more devlog posts across all your projects
+    Progress Tracking: Shows X/10 devlogs created
+    Cookie Reward: 15 cookies
+    Visibility: SECRET - Name and description hidden until earned
+
+13. Scrapbook usage?! [scrapbook_devlog]
+    Icon: slack
+    Description: Used scrapbook in a devlog
+    How to Earn: Create a devlog post with a scrapbook_url attached
+    Cookie Reward: 0 cookies
+    Visibility: SECRET - Name and description hidden until earned
+
+14. Cooking [cooking]
+    Icon: fire
+    Description: Cooked so hard you ended up making a fire project that made our staff very happy!
+    How to Earn: Create a project that gets marked as "fire" by the staff
+    Cookie Reward: 5 cookies
+    Visibility: SECRET - Name and description hidden until earned
+
+================================================================================
+ADDITIONAL SECRET ACHIEVEMENTS
+================================================================================
+
+Note: There may be additional secret achievements defined in the private secrets 
+submodule that are not publicly documented here. These achievements are only 
+available in production and are kept secret to maintain their surprise factor!
+
+To check for these achievements:
+- The system loads secret achievements from SecretAchievements::DEFINITIONS
+- These are defined in the secrets submodule (secrets/app/models/)
+- They are only available when the secrets submodule is present
+- Watch for achievement notifications as you use the platform!
+
+================================================================================
+ACHIEVEMENT SYSTEM DETAILS
+================================================================================
+
+Cookie Rewards:
+- Some achievements grant cookie rewards when earned
+- Cookies are automatically added to your balance via ledger entries
+- The reward amount is shown when you earn the achievement
+
+Progress Tracking:
+- Some achievements show your progress (e.g., "3/5 orders completed")
+- Progress is visible for achievements that track cumulative actions
+- Secret achievements don't show progress until earned
+
+Visibility Types:
+- VISIBLE: Name, description, and icon are always shown
+- SECRET: Shows as "???" until earned, may show progress
+- HIDDEN: Completely hidden until earned, no progress shown
+
+Achievement Notifications:
+- You'll see a notification when you earn an achievement
+- Notifications show the achievement name, description, icon, and cookie reward
+- Notifications are displayed in the flash messages area
+
+Tips for Achievement Hunters:
+1. Focus on creating projects and devlogs to earn multiple achievements
+2. Engage with the community through comments and interactions
+3. Complete your identity verification early for the cookie boost
+4. Keep an eye on progress-tracked achievements to see how close you are
+5. Shop orders count toward multiple achievements
+6. Secret achievements often reward creative or unexpected behavior
+7. Staff-recognized "fire" projects can earn you the rare "Cooking" achievement
+
+================================================================================
+END OF GUIDE
+================================================================================
